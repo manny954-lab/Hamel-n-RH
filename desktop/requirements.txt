@@ -1,0 +1,19 @@
+# desktop/requirements.txt
+# Cliente de escritorio Hamelín RH - Cool Circle
+# Interfaz nativa PySide6 (Qt), sin navegador.
+
+# Interfaz gráfica
+PySide6==6.7.1
+
+# Cliente HTTP para la API privada
+httpx==0.27.2
+
+# Validación de modelos de intercambio
+pydantic==2.9.2
+
+# Pruebas
+pytest==8.3.3
+pytest-qt==4.2.0
+
+# Empaquetado
+pyinstaller==6.22.3

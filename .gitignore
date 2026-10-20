@@ -1,0 +1,49 @@
+# Entornos virtuales
+.venv/
+venv/
+env/
+*.pyc
+__pycache__/
+*.py[cod]
+
+# Ejecutables y builds
+dist/
+build/
+*.exe
+*.app
+
+# Archivos de sistema
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Archivos temporales
+*.tmp
+*.bak
+
+# Base de datos local
+*.db
+*.sqlite
+
+# IDE
+.idea/
+.vscode/
+
+# Documentación generada
+*.pdf
+
+# Otros archivos temporales del proyecto
+poblar_todos.py
+poblar_todo2.py
+poblar_completo.py
+setup_completo.py
+setup_final.py
+iniciar_todo.sh
+start_server.sh
+
+# Archivos temporales de prueba
+/test_results/
+/.coverage
+/htmlcov/
