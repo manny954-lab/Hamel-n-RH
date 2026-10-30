@@ -20,7 +20,9 @@ class Settings(BaseSettings):
     environment: str = Field(default="development", alias="ENVIRONMENT")
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")
 
-    # Base de datos
+    # Base de datos (por defecto SQLite: archivo local, sin servidor externo.
+    # Funciona sin conexión y sin importar la red WiFi. Se puede sobrescribir con
+    # DATABASE_URL=postgresql+... en .env si se desea usar PostgreSQL central.)
     postgres_user: str = Field(default="postgres", alias="POSTGRES_USER")
     postgres_password: str = Field(default="", alias="POSTGRES_PASSWORD")
     postgres_db: str = Field(default="hamelin_rh", alias="POSTGRES_DB")
@@ -28,14 +30,18 @@ class Settings(BaseSettings):
     postgres_port: int = Field(default=5432, alias="POSTGRES_PORT")
 
     database_url: str = Field(
-        default="postgresql+psycopg2://postgres:postgres@localhost:5432/hamelin_rh",
+        default="sqlite:///./hamelin_rh.db",
         alias="DATABASE_URL",
     )
 
     # Servidor
-    backend_host: str = Field(default="0.0.0.0", alias="BACKEND_HOST")
-    backend_port: int = Field(default=8000, alias="BACKEND_PORT")
+    backend_host: str = Field(default="127.0.0.1", alias="BACKEND_HOST")
+    backend_port: int = Field(default=8001, alias="BACKEND_PORT")
     backend_reload: bool = Field(default=False, alias="BACKEND_RELOAD")
+
+    # URL que usa el cliente de escritorio para conectar a la API (localhost =
+    # funciona sin importar la red WiFi ni si hay conexión a Internet).
+    client_api_url: str = Field(default="http://127.0.0.1:8001", alias="CLIENT_API_URL")
 
     # Seguridad
     secret_key: str = Field(default="cambiar_en_produccion", alias="SECRET_KEY")

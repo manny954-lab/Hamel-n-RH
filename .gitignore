@@ -26,6 +26,12 @@ Thumbs.db
 # Base de datos local
 *.db
 *.sqlite
+*.db-wal
+*.db-shm
+
+# Variables de entorno con credenciales (nunca subir)
+.env
+server/.env
 
 # IDE
 .idea/

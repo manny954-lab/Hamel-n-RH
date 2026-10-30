@@ -1,15 +1,21 @@
-"""Vista de incidencias y justificantes."""
+"""Vista de incidencias y justificantes con generación automática y aprobaciones."""
 
 from __future__ import annotations
 
-from PySide6.QtCore import QThread, Signal
+from PySide6.QtCore import QThread, Signal, Qt
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QHBoxLayout, QLabel, QLineEdit, QMessageBox, QPushButton, QTableWidget,
     QTableWidgetItem, QVBoxLayout, QWidget, QComboBox, QDateEdit,
+    QFrame, QHeaderView,
 )
 
 from app.api_client import ApiClient, ApiClientError
 from app.components.componentes import BotonAccion, mensaje_padre
+from app.ui.theme import (
+    ACENTO, ADVERTENCIA, ERROR, EXITO, FONDO_PRINCIPAL, FONDO_PANEL,
+    FONDO_TARJETA, TEXTO_PRIMARIO, TEXTO_SECUNDARIO,
+)
 
 
 class CargarLista(QThread):
@@ -29,41 +35,130 @@ class CargarLista(QThread):
             self.fallido.emit(str(e))
 
 
+class AccionAPI(QThread):
+    listo = Signal(dict)
+    fallido = Signal(str)
+
+    def __init__(self, api: ApiClient, metodo: str, ruta: str, datos=None, params=None):
+        super().__init__()
+        self.api = api
+        self.metodo = metodo
+        self.ruta = ruta
+        self.datos = datos
+        self.params = params or {}
+
+    def run(self):
+        try:
+            if self.metodo == "GET":
+                self.listo.emit(self.api.get(self.ruta, params=self.params))
+            elif self.metodo == "POST":
+                self.listo.emit(self.api.post(self.ruta, json=self.datos, params=self.params))
+        except ApiClientError as e:
+            self.fallido.emit(str(e))
+
+
+class TarjetaEstado(QFrame):
+    def __init__(self, etiqueta: str, valor: str = "0", color=ACENTO):
+        super().__init__()
+        self.setObjectName("tarjetaEstado")
+        self.setFixedSize(170, 100)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(14, 12, 14, 12)
+        layout.setSpacing(4)
+        lbl_etq = QLabel(etiqueta.upper())
+        lbl_etq.setStyleSheet(f"color: {TEXTO_SECUNDARIO}; font-size: 10px; font-weight: 700;")
+        self.lbl_valor = QLabel(valor)
+        self.lbl_valor.setObjectName("valorEstado")
+        color_hex = color.name if hasattr(color, "name") else str(color)
+        self.lbl_valor.setStyleSheet(f"color: {color_hex}; font-size: 26px; font-weight: 800;")
+        layout.addWidget(lbl_etq)
+        layout.addWidget(self.lbl_valor)
+        layout.addStretch()
+        barra = QFrame()
+        barra.setFixedHeight(3)
+        barra.setStyleSheet(f"background-color: {color_hex}; border-radius: 1px;")
+        layout.addWidget(barra)
+        color_hex = color.name if hasattr(color, "name") else str(color)
+        self.setStyleSheet(f"""
+            QFrame#tarjetaEstado {{
+                background-color: {FONDO_TARJETA};
+                border: 1px solid #3a3a45;
+                border-radius: 10px;
+            }}
+        """)
+
+    def set_valor(self, valor: str):
+        self.lbl_valor.setText(str(valor))
+
+
 class IncidenciasView(QWidget):
     def __init__(self, api: ApiClient, parent=None):
         super().__init__(parent)
         self.api = api
+        self._datos = []
         self._construir()
         self.cargar_incidencias()
 
     def _construir(self):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(24, 24, 24, 24)
-        layout.setSpacing(12)
+        layout.setSpacing(16)
 
-        barra = QHBoxLayout()
-        self.combo_estado = QComboBox()
-        self.combo_estado.addItems(["todos", "pendiente", "en_revision", "aprobada", "rechazada"])
+        lbl = QLabel("Incidencias y Justificantes")
+        lbl.setStyleSheet("font-size: 22px; font-weight: 800; color: #e8e8ea;")
+        layout.addWidget(lbl)
+
+        # Acciones rápidas
+        acciones = QHBoxLayout()
+        btn_faltas = BotonAccion("Generar faltas automáticas", primario=True)
+        btn_faltas.setObjectName("btnFaltas")
+        btn_faltas.clicked.connect(self.generar_faltas)
         btn_refresh = BotonAccion("Actualizar")
         btn_refresh.clicked.connect(self.cargar_incidencias)
-        barra.addWidget(QLabel("Estado:"))
-        barra.addWidget(self.combo_estado)
-        barra.addStretch()
-        barra.addWidget(btn_refresh)
-        layout.addLayout(barra)
+        acciones.addWidget(btn_faltas)
+        acciones.addWidget(btn_refresh)
+        acciones.addStretch()
+        layout.addLayout(acciones)
 
+        # Filtro
+        filtro = QHBoxLayout()
+        self.combo_estado = QComboBox()
+        self.combo_estado.addItems(["todos", "pendiente", "en_revision", "aprobada", "rechazada"])
+        self.combo_estado.currentIndexChanged.connect(self.cargar_incidencias)
+        filtro.addWidget(QLabel("Estado:"))
+        filtro.addWidget(self.combo_estado)
+        filtro.addStretch()
+        layout.addLayout(filtro)
+
+        # KPIs
+        self.grid_kpis = QHBoxLayout()
+        self.grid_kpis.setSpacing(12)
+        self.tarjetas = {}
+        for clave, etiqueta, color in [
+            ("total", "Total incidencias", ACENTO),
+            ("pendientes", "Pendientes", ADVERTENCIA),
+            ("aprobadas", "Aprobadas", EXITO),
+            ("rechazadas", "Rechazadas", ERROR),
+        ]:
+            t = TarjetaEstado(etiqueta, "0", color)
+            self.tarjetas[clave] = t
+            self.grid_kpis.addWidget(t)
+        layout.addLayout(self.grid_kpis)
+
+        # Tabla
         self.tabla = QTableWidget()
         self.tabla.setColumnCount(9)
         self.tabla.setHorizontalHeaderLabels([
             "Núm. Empleado", "Nombre Empleado", "Fecha", "Tipo",
-            "Minutos retardo", "Tiempo (min)", "Regla aplicada",
-            "Justificada", "Estado",
+            "Retardo (min)", "Tiempo (min)", "Regla aplicada", "Justificada", "Estado",
         ])
         self.tabla.horizontalHeader().setStretchLastSection(True)
+        self.tabla.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.tabla.setAlternatingRowColors(True)
         layout.addWidget(self.tabla, stretch=1)
 
         self.lbl_estado = QLabel("")
-        self.lbl_estado.setStyleSheet("color: #9aa0a6; font-size: 12px;")
+        self.lbl_estado.setStyleSheet(f"color: {TEXTO_SECUNDARIO}; font-size: 12px;")
         layout.addWidget(self.lbl_estado)
 
     def cargar_incidencias(self):
@@ -77,6 +172,17 @@ class IncidenciasView(QWidget):
 
     def _listo(self, datos):
         self.tabla.setRowCount(0)
+        self._datos = datos
+        total = len(datos)
+        pendientes = sum(1 for d in datos if d.get("estado") == "pendiente")
+        aprobadas = sum(1 for d in datos if d.get("estado") == "aprobada")
+        rechazadas = sum(1 for d in datos if d.get("estado") == "rechazada")
+
+        self.tarjetas["total"].set_valor(str(total))
+        self.tarjetas["pendientes"].set_valor(str(pendientes))
+        self.tarjetas["aprobadas"].set_valor(str(aprobadas))
+        self.tarjetas["rechazadas"].set_valor(str(rechazadas))
+
         for inc in datos:
             fila = self.tabla.rowCount()
             self.tabla.insertRow(fila)
@@ -92,125 +198,36 @@ class IncidenciasView(QWidget):
                 inc.get("estado", ""),
             ]
             for col, v in enumerate(valores):
-                self.tabla.setItem(fila, col, QTableWidgetItem(str(v)))
-        self.lbl_estado.setText(f"{len(datos)} incidencia(s).")
+                item = QTableWidgetItem(str(v))
+                self.tabla.setItem(fila, col, item)
+                if col == 8:
+                    est = str(v)
+                    if est == "pendiente":
+                        item.setForeground(QColor("#ff9800"))
+                    elif est == "aprobada":
+                        item.setForeground(QColor("#4caf50"))
+                    elif est == "rechazada":
+                        item.setForeground(QColor("#f44336"))
+
+        self.lbl_estado.setText(f"{total} incidencia(s) | {pendientes} pendiente(s).")
 
     def _error(self, mensaje):
         self.lbl_estado.setText(f"Error: {mensaje}")
         mensaje_padre(self, "Error", mensaje, "error")
 
+    def generar_faltas(self):
+        self.lbl_estado.setText("Generando faltas automáticas...")
+        self.hilo_accion = AccionAPI(
+            self.api, "POST", "/api/v1/demo/generar-faltas"
+        )
+        self.hilo_accion.listo.connect(self._faltas_listo)
+        self.hilo_accion.fallido.connect(self._error)
+        self.hilo_accion.start()
 
-class JustificantesView(QWidget):
-    def __init__(self, api: ApiClient, parent=None):
-        super().__init__(parent)
-        self.api = api
-        self._construir()
-        self.cargar()
-
-    def _construir(self):
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(24, 24, 24, 24)
-        layout.setSpacing(12)
-
-        lbl = QLabel("Justificantes")
-        from PySide6.QtWidgets import QLabel as _QL
-        lbl.setStyleSheet("font-size: 18px; font-weight: 700;")
-        layout.addWidget(lbl)
-
-        self.tabla = QTableWidget()
-        self.tabla.setColumnCount(7)
-        self.tabla.setHorizontalHeaderLabels([
-            "Empleado", "Tipo", "Fecha incidencia", "Descripción", "Estado",
-            "Fecha solicitud", "ID",
-        ])
-        self.tabla.horizontalHeader().setStretchLastSection(True)
-        layout.addWidget(self.tabla, stretch=1)
-
-        form = QHBoxLayout()
-        self.edit_estado = QComboBox()
-        self.edit_estado.addItems(["pendiente", "en_revision", "aprobada", "rechazada", "cancelada"])
-        self.edit_motivo = QLineEdit()
-        self.edit_motivo.setPlaceholderText("Motivo (requerido si rechaza)")
-        btn_aprobar = BotonAccion("Aprobar seleccionada", primario=True)
-        btn_aprobar.clicked.connect(self.aprobar)
-        btn_rechazar = BotonAccion("Rechazar seleccionada")
-        btn_rechazar.setObjectName("btnPeligro")
-        btn_rechazar.clicked.connect(self.rechazar)
-        btn_refresh = BotonAccion("Actualizar")
-        btn_refresh.clicked.connect(self.cargar)
-        form.addWidget(self.edit_estado)
-        form.addWidget(self.edit_motivo)
-        form.addWidget(btn_aprobar)
-        form.addWidget(btn_rechazar)
-        form.addWidget(btn_refresh)
-        layout.addLayout(form)
-
-        self.lbl_estado = QLabel("")
-        self.lbl_estado.setStyleSheet("color: #9aa0a6; font-size: 12px;")
-        layout.addWidget(self.lbl_estado)
-
-    def cargar(self):
-        self.lbl_estado.setText("Cargando justificantes...")
-        self.hilo = CargarLista(self.api, "/api/v1/incidencias/justificantes")
-        self.hilo.listo.connect(self._listo)
-        self.hilo.fallido.connect(self._error)
-        self.hilo.start()
-
-    def _listo(self, datos):
-        self.tabla.setRowCount(0)
-        self._datos = datos
-        for j in datos:
-            fila = self.tabla.rowCount()
-            self.tabla.insertRow(fila)
-            valores = [
-                str(j.get("empleado_id", ""))[:8],
-                j.get("tipo", ""),
-                j.get("fecha_incidencia", ""),
-                j.get("descripcion") or "",
-                j.get("estado", ""),
-                j.get("fecha_solicitud", ""),
-                str(j.get("id", ""))[:8],
-            ]
-            for col, v in enumerate(valores):
-                self.tabla.setItem(fila, col, QTableWidgetItem(str(v)))
-        self.lbl_estado.setText(f"{len(datos)} justificante(s).")
-
-    def _error(self, mensaje):
-        self.lbl_estado.setText(f"Error: {mensaje}")
-        mensaje_padre(self, "Error", mensaje, "error")
-
-    def _id_seleccionado(self):
-        fila = self.tabla.currentRow()
-        if fila < 0:
-            return None
-        return self._datos[fila]["id"]
-
-    def aprobar(self):
-        jid = self._id_seleccionado()
-        if not jid:
-            mensaje_padre(self, "Validación", "Seleccione un justificante.", "advertencia")
-            return
-        try:
-            self.api.post(f"/api/v1/incidencias/justificantes/{jid}/decidir",
-                          params={"estado": "aprobada", "motivo": ""})
-            mensaje_padre(self, "Éxito", "Justificante aprobado.", "exito")
-            self.cargar()
-        except ApiClientError as e:
-            mensaje_padre(self, "Error", str(e), "error")
-
-    def rechazar(self):
-        jid = self._id_seleccionado()
-        if not jid:
-            mensaje_padre(self, "Validación", "Seleccione un justificante.", "advertencia")
-            return
-        motivo = self.edit_motivo.text().strip()
-        if not motivo:
-            mensaje_padre(self, "Validación", "El motivo es obligatorio para rechazar.", "advertencia")
-            return
-        try:
-            self.api.post(f"/api/v1/incidencias/justificantes/{jid}/decidir",
-                          params={"estado": "rechazada", "motivo": motivo})
-            mensaje_padre(self, "Éxito", "Justificante rechazado.", "exito")
-            self.cargar()
-        except ApiClientError as e:
-            mensaje_padre(self, "Error", str(e), "error")
+    def _faltas_listo(self, datos: dict):
+        self.lbl_estado.setText(
+            f"Faltas generadas: {datos.get('faltas_creadas', 0)} "
+            f"({datos.get('empleados_con_entrada', 0)} ya tenían entrada)."
+        )
+        mensaje_padre(self, "Éxito", "Faltas automáticas generadas correctamente.", "exito")
+        self.cargar_incidencias()

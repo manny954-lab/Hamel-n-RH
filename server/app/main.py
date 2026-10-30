@@ -4,7 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import settings
-from app.api import auth, usuarios, roles, catalogos, empleados, asistencia, incidencias, nomina, auditoria, reportes, consulta_bd
+from app.api import auth, usuarios, roles, catalogos, empleados, asistencia, incidencias, nomina, auditoria, reportes, consulta_bd, demo
 
 
 def create_app() -> FastAPI:
@@ -33,7 +33,7 @@ def create_app() -> FastAPI:
     app.include_router(auditoria.router)
     app.include_router(reportes.router)
     app.include_router(consulta_bd.router)
-    app.include_router(consulta_bd.router)
+    app.include_router(demo.router)
 
     @app.get("/health", tags=["Salud"])
     def health():
